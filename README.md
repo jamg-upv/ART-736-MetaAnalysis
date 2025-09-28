@@ -1,15 +1,14 @@
 
-codigo para metanalisis usado en art-736 (pendiente de ocnverger a un modelo junto con art-639
-
-# Videos de Soporte
-https://media.upv.es/#/portal/channel/5ab9fa10-22b4-11ef-8f10-ab3091b330f3
-
-# Description
-
 # Meta-Analysis Project: ART 736-Canet
 
 ## Overview
 This R Markdown document contains a comprehensive meta-analysis workflow for processing and analyzing effect sizes from multiple studies. The project follows a systematic approach through several stages, from data preprocessing to final analysis and visualization.
+
+# Videos de Soporte
+https://media.upv.es/#/portal/channel/5ab9fa10-22b4-11ef-8f10-ab3091b330f3
+
+# pending 
+Converger a un modelo junto con art-639
 
 ## Project Structure
 
