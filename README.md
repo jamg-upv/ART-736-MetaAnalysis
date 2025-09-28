@@ -8,7 +8,8 @@ This R Markdown document contains a comprehensive meta-analysis workflow for pro
 https://media.upv.es/#/portal/channel/5ab9fa10-22b4-11ef-8f10-ab3091b330f3
 
 # pending 
-Converger a un modelo junto con art-639
+* Converger a un modelo junto con art-639
+* Documetnos excel de ejemplo
 
 ## Project Structure
 
