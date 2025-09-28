@@ -1,0 +1,925 @@
+---
+title: "ART 736-Canet meta analisis. colapasar effect size + calculos meta analisis y resultados tablas y graficos"
+format: html
+editor: visual
+---
+
+# colapsar estudios con más de tres filas
+
+
+Referencias:
+
+https://www.erim.eur.nl/research-support/meta-essentials/frequently-asked-questions/
+
+Some research reports present empirical evidence for multiple subgroups of a sample/population, or for multiple outcomes in a single study. These are essentially two different problems and therefore require different approaches. (See also: [Borenstein et al., 2009](https://www.erim.eur.nl/research-support/meta-essentials/frequently-asked-questions/#c46910 "Opens internal link in current window"): p. 215 ff).
+
+Note that if a single study reports information for subgroups of the sample studied, these subgroups are essentially independent of each other, which means that the reported effect sizes for each of the subgroups can be treated as if they were separate studies.
+
+Alternatively, and this does cause dependency problems in meta-analysis, a single study reports multiple outcomes for the same sample. For example, studies in management may report information on financial and non-financial performance, which for present purposes are both valid measures of the construct 'performance'. The problem with this type of data is that the same units of analysis provided information for both outcomes, which means the effect sizes for both outcomes are not independent of each other, and incorrect estimates of the variance of the combined effect size will occur.
+
+formula 24.5 pagian 230 Borenstein et al (2009)
+
+![A falta de datos de correlación, Lo más conservador es considerar que la correlacion es 1. Porque eso aumenta la varianza. Es el modelo que vamos a seguir.](images/clipboard-647542219.png)
+
+# Etapa 0 Descripción del archivo con datos a colapsar (si los hay)
+
+el archivo de excel ColapsarEffecSizes.xlsx contiene los datos a procesar.
+
+Esta organizado en hojas con datos. Hay que crear una unica tabla a partir de los datos. Para ello vamos a proceder en varias etapas.
+
+```{r}
+#describir la hoja de calculo de origen
+# Instalar y cargar la librería necesaria
+if (!requireNamespace("readxl", quietly = TRUE)) {
+  install.packages("readxl")
+}
+library(readxl)
+
+# Nombre del archivo
+archivo <- "BRANHAM_V2.xlsx"
+
+# Obtener el nombre de la primera hoja
+nombre_hoja <- excel_sheets(archivo)[1]
+
+# Leer la primera hoja del archivo Excel
+datos <- read_excel(archivo, sheet = 1)
+
+# Obtener los nombres de las columnas
+nombres_columnas <- names(datos)
+
+# Obtener los tipos de datos de cada columna
+tipos_datos <- sapply(datos, class)
+
+# Imprimir la información
+cat("Nombre de la primera hoja:\n")
+print(nombre_hoja)
+
+cat("\nNombres de las columnas:\n")
+cat(paste(nombres_columnas, collapse = "\n"))
+
+cat("\n\nTipos de datos en cada columna:\n")
+for (i in seq_along(tipos_datos)) {
+  cat(sprintf("%s: %s\n", names(tipos_datos)[i], tipos_datos[i]))
+}
+
+
+#para cada analisis parametrizar los rotulos
+# Definir una variable para el nombre base del archivo
+nombre_base <- "ART-736canetMeta-"
+
+# Obtener la fecha y hora actual
+fecha_hora <- format(Sys.time(), "%Y%m%d_%H%M%S")
+```
+
+# Etapa 1 conseguir una excel con los datos colapsados
+
+
+El archivo con datos se llama """ColapsarEffecSizes.xlsx""" (cocatenado con la hora y nombre base) y estará en la misma carpeta que el script que se va a ejecutar
+
+calcula los agregados de media de effect size y calculo de la varianza de multiples outcomes segun la formula 24.5 de borenstein et al 2009
+
+En cada hoja hay filas de datos separadas por lineas en blanco (sin valor en la columna ID).
+
+Hay que ir repasando la hoja fila a fila.
+
+Cuando solo hay una fila de datos entre dos filas en blanco, no hay que realizar ningun calculo, simplemente se copian los valores a "sheet_calculations" de este modo:
+
+"ID único de muestra" se copia a "studyId"
+
+"Hedges' g (effect size)" se copia a " effectsize_g"
+
+"g variance (std error \^2)" se copia a "variance_g"
+
+"sheetname" se copia a "analysis"
+
+"ID" se copia a "combinedIDs"
+
+
+Cuando hay varias filas de datos entre filas en blanco,
+
+se concatenan los ID combinados separados por ";"
+
+Se rellenan todas las filas de la columna "analysis" con el nombre de la hoja de la que provienen los datos que estaba almacenada en la variable "sheetname" \
+## E1-Codigo a ejecutar
+```{r}
+# Cargar las librerías necesarias
+library(readxl)
+library(dplyr)
+
+# Nombre del archivo Excel
+excel_file <- archivo
+
+# Obtener los nombres de todas las hojas
+all_sheets <- excel_sheets(excel_file)
+
+# Crear un dataframe vacío para almacenar los resultados
+sheet_calculations <- data.frame(
+  studyId = character(),
+  effectsize_g = numeric(),
+  variance_g = numeric(),
+  analysis = character(),
+  combinedIDs = character(),
+  stringsAsFactors = FALSE
+)
+
+# Función para calcular la media y varianza agregada con la fórmula 24.5 de Borenstein et al. 2009:
+calculate_aggregate <- function(group, r_jk) {
+  m <- nrow(group)
+  mean_effect <- mean(group$`Hedges' g (effect size)`)
+  
+  # Calcular la varianza según la fórmula 24.5 de Borenstein
+  sum_var <- sum(group$`g variance (std error ^2)`)
+  
+  # Calcular la suma de los productos cruzados con la correlación r_jk
+  sum_cross_products <- 0
+  for (j in 1:m) {
+    for (k in 1:m) {
+      if (j != k) {
+        sum_cross_products <- sum_cross_products + 
+          r_jk * sqrt(group$`g variance (std error ^2)`[j] * 
+                      group$`g variance (std error ^2)`[k])
+      }
+    }
+  }
+  
+  var_effect <- (1 / m^2) * (sum_var + sum_cross_products)
+  
+  combined_ids <- paste(group$ID, collapse = ", ")
+  
+  return(c(mean_effect, var_effect, combined_ids))
+}
+
+# Para procesar todas las hojas, comenta la siguiente línea y descomenta la línea subsiguiente
+# for (sheetname in all_sheets[1]) {  # Iterar solo sobre la primera hoja (para pruebas de concepto)
+for (sheetname in all_sheets) {  # Descomenta esta línea para procesar todas las hojas
+  
+  # Leer los datos de la hoja
+  
+  # sheetdata <- read_excel(excel_file, sheet = sheetname) %>%
+  #   select(`ID`, `ID único de muestra`, `Hedges' g (effect size)`, `g variance (std error ^2)`)  # esto solo si estuvieran todos los datos completos
+  sheetdata <- read_excel(excel_file, sheet = sheetname)
+    # Modificar e imputar la columna `ID único de muestra` si está vacía
+  sheetdata$`ID único de muestra` <- ifelse(
+    is.na(sheetdata$`ID único de muestra`) | sheetdata$`ID único de muestra` == "", 
+    paste(
+      sub(",.*", "", sheetdata$Authors),  # Extrae el texto antes de la coma en 'Authors'
+      sheetdata$Año,                      # Año
+      sheetdata$Outcomes,                 # Outcomes
+      sep = "_"
+    ),
+    sheetdata$`ID único de muestra`  # Dejar el valor original si no está vacío
+  )
+  
+  # Seleccionar las columnas deseadas para el resultado final
+  sheetdata <- sheetdata[, c("ID", "ID único de muestra", "Hedges' g (effect size)", "g variance (std error ^2)")]
+
+
+  
+  
+  # Inicializar variables
+  current_group <- data.frame()
+  last_id <- ""
+  
+  # Procesar cada fila
+  for (i in 1:nrow(sheetdata)) {
+    row <- sheetdata[i, ]
+    
+    if (!is.na(row$ID) && row$ID != "") {
+      current_group <- rbind(current_group, row)
+      last_id <- row$`ID único de muestra`
+    } else {
+      if (nrow(current_group) == 1) {
+        # Si solo hay una fila, copiar directamente
+        sheet_calculations <- rbind(sheet_calculations, data.frame(
+          studyId = current_group$`ID único de muestra`,
+          effectsize_g = current_group$`Hedges' g (effect size)`,
+          variance_g = current_group$`g variance (std error ^2)`,
+          analysis = sheetname,
+          combinedIDs = current_group$ID,
+          stringsAsFactors = FALSE
+        ))
+      } else if (nrow(current_group) > 1) {
+        # Si hay múltiples filas, calcular agregados
+        agg_results <- calculate_aggregate(current_group, r_jk = 1)  # o el valor que se considere apropiado
+        sheet_calculations <- rbind(sheet_calculations, data.frame(
+          studyId = last_id,
+          effectsize_g = agg_results[1],
+          variance_g = agg_results[2],
+          analysis = sheetname,
+          combinedIDs = agg_results[3],
+          stringsAsFactors = FALSE
+        ))
+      }
+      current_group <- data.frame()
+    }
+  }
+  
+  # Procesar el último grupo si es necesario
+  if (nrow(current_group) > 0) {
+    if (nrow(current_group) == 1) {
+      sheet_calculations <- rbind(sheet_calculations, data.frame(
+        studyId = current_group$`ID único de muestra`,
+        effectsize_g = current_group$`Hedges' g (effect size)`,
+        variance_g = current_group$`g variance (std error ^2)`,
+        analysis = sheetname,
+        combinedIDs = current_group$ID,
+        stringsAsFactors = FALSE
+      ))
+    } else {
+      agg_results <- calculate_aggregate(current_group)
+      sheet_calculations <- rbind(sheet_calculations, data.frame(
+        studyId = last_id,
+        effectsize_g = agg_results[1],
+        variance_g = agg_results[2],
+        analysis = sheetname,
+        combinedIDs = agg_results[3],
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  
+  # Imprimir el nombre de la hoja procesada (para depuración)
+  print(paste("Procesada la hoja:", sheetname))
+}
+
+# Imprimir las primeras filas de sheet_calculations para verificar
+print(head(sheet_calculations))
+```
+
+## sacar la tabla en formato excel
+
+```{r}
+# Imprimir las primeras filas de sheet_calculations para verificar
+View(sheet_calculations)
+```
+
+```{r}
+# imprimir hoja excel
+# # Crear el nombre del archivo CSV
+# nombre_archivo <- paste0(nombre_base, "EScolapsados_",fecha_hora, ".csv")
+# 
+# # Guardar resultados en un archivo CSV
+# write.csv(sheet_calculations, nombre_archivo, row.names = FALSE)
+
+library(writexl)
+# Crear el nombre del archivo Excel
+nombre_archivoxl <- paste0(nombre_base, "EScolapsados_",fecha_hora, ".xlsx")
+
+# Guardar resultados en un archivo Excel
+write_xlsx(sheet_calculations, nombre_archivoxl)
+
+# Imprimir mensaje de confirmación
+print(paste("Resultados guardados en", nombre_archivoxl))
+
+```
+
+# Etapas 2 calculo de meta analisis de cada grupo por separado
+
+
+## E2 codigo a ejecutar. Funciona
+
+Comprobado con metaeessentiasl que las estimaciones cuadran. en meta essential se mete stad error y n. pero n es solo para IC en forestplot. Stad Error es raiz cuadradad de varianza. Los valores de Combined effect size, IC, Q y p-Q son iguales para OUTCOME_ATTITUDDE y para OUTCOME-ATTITUDE_3d y 360. la tau2 de meta-essentials es distinta y por lo tanto tambien cambia la I2 y los PI (que en mi codigo están seguro bien porque salen directamente del objeto rma_res.no son calculados a mano)
+
+```{r}
+#fijar fecha y hora
+fechatag<-format(Sys.time(), "%Y%m%d_%H%M%S")
+```
+
+```{r}
+# Librerías necesarias
+library(readxl)
+library(metafor)
+library(writexl)
+library(dplyr)
+
+# Cargar los datos
+# datosXmeta <- read_excel("ART-736canetMeta-EScolapsados_20241020_215007ordered_SEGUNDA FASE_V2.xlsx")
+datosXmeta <- read_excel("DATOS PARA ANALISIS_V5.xlsx")
+
+
+# Definir columnas
+effectSizeXmeta <- "effectsize_g"
+effectSizeVarXmeta <- "variance_g" 
+moderadoraXmeta <- "analysis"
+
+# Convertir las columnas a numéricas
+datosXmeta[[effectSizeXmeta]] <- as.numeric(datosXmeta[[effectSizeXmeta]])
+datosXmeta[[effectSizeVarXmeta]] <- as.numeric(datosXmeta[[effectSizeVarXmeta]])
+
+# Definir método para heterogeneidad
+method <- "HE"
+
+# Crear dataframe para resultados
+resultados <- data.frame(
+  valormoderadoraXmeta = character(),
+  k = numeric(),
+  g = numeric(),
+  SE = numeric(),
+  CI_lower = numeric(),
+  CI_upper = numeric(),
+  PI_lower = numeric(),
+  PI_upper = numeric(),
+  CrdI_lower = numeric(),
+  CrdI_upper = numeric(),
+  Z_value = numeric(),
+  p_value = numeric(),
+  Q_stat = numeric(),
+  Q_pval = numeric(),
+  tau2 = numeric(),
+  I2 = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Lista para almacenar objetos rma
+lista_rma <- list()
+
+# Obtener grupos únicos
+grupos <- unique(datosXmeta[[moderadoraXmeta]])
+
+# Realizar meta-análisis para cada grupo
+for(grupo in grupos) {
+  # Subconjunto de datos
+  datos_subset <- subset(datosXmeta, datosXmeta[[moderadoraXmeta]] == grupo)
+  
+  # Meta-análisis
+  rma_res <- rma(yi = datos_subset[[effectSizeXmeta]], 
+                 vi = datos_subset[[effectSizeVarXmeta]], 
+                 data = datos_subset, 
+                 method = method,
+                 slab = studyId)
+  
+  # Guardar objeto rma
+  lista_rma[[grupo]] <- rma_res
+  
+  # Calcular PI correctamente
+  pred <- predict(rma_res, level = 95)
+  
+  # Calcular intervalos de credibilidad (CrdI = TE ± 1.96 × τ)
+  crdi_lower <- rma_res$b[1] - 1.96 * sqrt(rma_res$tau2)
+  crdi_upper <- rma_res$b[1] + 1.96 * sqrt(rma_res$tau2)
+  
+  # Añadir resultados al dataframe
+  nueva_fila <- data.frame(
+    valormoderadoraXmeta = grupo,
+    k = rma_res$k,
+    g = rma_res$b[1],
+    SE = rma_res$se,
+    CI_lower = rma_res$ci.lb,
+    CI_upper = rma_res$ci.ub,
+    PI_lower = pred$pi.lb,
+    PI_upper = pred$pi.ub,
+    CrdI_lower = crdi_lower,
+    CrdI_upper = crdi_upper,
+    Z_value = rma_res$zval,
+    p_value = rma_res$pval,
+    Q_stat = rma_res$QE,
+    Q_pval = rma_res$QEp,
+    tau2 = rma_res$tau2,
+    I2 = rma_res$I2
+  )
+  
+  resultados <- rbind(resultados, nueva_fila)
+}
+
+
+```
+
+```{r}
+datosXmeta
+# Guardar resultados en Excel
+nombre_archivoxl <- paste0("ART-736canetMeta-analisis-",fechatag, ".xlsx")
+write_xlsx(resultados, nombre_archivoxl)
+
+# Imprimir mensaje de confirmación
+print(paste("Resultados guardados en", nombre_archivoxl))
+# Los objetos rma están almacenados en lista_rma para su uso posterior en gráficos
+```
+
+# ETAPA 3 Forest Plot y funnel plot y trim and fill
+
+Los datos están cargados en datosXmeta Hemos definido las columnas relevantes en estas variables effectSizeXmeta \<- "effectsize_g" effectSizeVarXmeta \<- "variance_g" moderadoraXmeta \<- "analysis" Id\<-"studyId" titletag\<-"ART-736canetMeta-analisis-" fechatag
+
+y la agrupacion de estudios en \# Obtener grupos únicos grupos \<- unique(datosXmeta\[\[moderadoraXmeta\]\])
+
+Hemos guardado los resultados de cada metaanalisis en este objeto lista_rma\[\[grupo\]\] \<- rma_res
+
+y ahora quiero una funcion que me genere un forest plot y otra que me genere un funnel plto con trima and fill leer los valores del resultado de metaanalisis del resultado de cada grupo mostrar los graficos y guardarlos como PDF
+
+En el forest plot quiero que salga el Id del estudio y no un numero que pueda ordenar alfabetico sobre Id o el orden natural de los estudios en datosXmeta (lo que elija en una variable "orden")
+
+no consigo que funcione el reordenarlos (es mas facl reordenar la excel que hacerlo desde aqui)
+
+## ejmeplo de la interpretación de  grupos:
+
+MEDIA_360:
+
+No se detectaron estudios faltantes (Estimated number of missing studies on the left side: 0) Por lo tanto, los resultados mostrados son los originales El tamaño del efecto es 0.5671 (significativo, p \< .0001) Hay heterogeneidad significativa (I² = 92.09%) MEDIA_3D:
+
+Se detectaron 11 estudios potencialmente faltantes en el lado izquierdo Los resultados mostrados son después de la imputación de estos 11 estudios El tamaño del efecto original probablemente era más alto, pero después de la imputación: El tamaño del efecto se redujo a 0.0056 (no significativo, p = 0.9678) La heterogeneidad sigue siendo alta (I² = 93.94%)
+
+## E3 codigo a ejecutar
+
+```{r}
+# Función para Forest Plot
+crear_forest <- function(rma_resultado, datos_grupo, nombre_grupo, 
+                        guardar_pdf = FALSE, 
+                        nombre_archivo = NULL) {
+  
+  # Crear el forest plot
+  forest_res <- forest(rma_resultado,
+                      header = TRUE,
+                      annotate = TRUE,
+                      showweights = TRUE,
+                      xlab = "Effect Size (g)",
+                      mlab = "RE Model",
+                      main = paste("Forest Plot -", nombre_grupo))
+  
+  # Guardar en PDF si se solicita
+  if(guardar_pdf && !is.null(nombre_archivo)) {
+    pdf(nombre_archivo, width = 10, height = max(8, length(rma_resultado$yi) * 0.3))
+    forest(rma_resultado,
+           header = TRUE,
+           annotate = TRUE,
+           showweights = TRUE,
+           xlab = "Effect Size (g)",
+           mlab = "RE Model")
+    dev.off()
+  }
+  
+  return(forest_res)
+}
+
+# Función para Funnel Plot
+crear_funnel <- function(rma_resultado, nombre_grupo, 
+                        guardar_pdf = FALSE, 
+                        nombre_archivo = NULL,
+                        guardar_txt = FALSE,
+                        nombre_archivo_txt = NULL) {
+  
+  # Verificar si hay suficientes estudios para trim and fill
+  if(length(rma_resultado$yi) < 3) {
+    message(paste("Advertencia: Grupo", nombre_grupo, "tiene menos de 3 estudios.",
+                 "No se puede realizar funnel plot con trim and fill."))
+    return(NULL)
+  }
+  
+  # Intentar realizar trim and fill con manejo de errores
+  tryCatch({
+    # Realizar trim and fill
+    tf_resultado <- trimfill(rma_resultado)
+    
+    # Imprimir resultados en pantalla
+    cat("\nResultados del Trim and Fill para", nombre_grupo, ":\n")
+    print(summary(tf_resultado))
+    cat("\nNúmero de estudios imputados:", sum(tf_resultado$fill))
+    
+    # Guardar resultados en archivo txt si se solicita
+    if(guardar_txt && !is.null(nombre_archivo_txt)) {
+      sink(nombre_archivo_txt)
+      cat("Resultados del Trim and Fill para", nombre_grupo, "\n\n")
+      print(summary(tf_resultado))
+      cat("\nNúmero de estudios imputados:", sum(tf_resultado$fill), "\n")
+      
+      # Agregar información adicional sobre los estudios imputados
+      if(sum(tf_resultado$fill) > 0) {
+        cat("\nEstudios imputados:\n")
+        cat("Effect Size (g) | Standard Error\n")
+        cat("--------------------------------\n")
+        imputados <- data.frame(
+          yi = tf_resultado$yi[tf_resultado$fill],
+          se = sqrt(tf_resultado$vi[tf_resultado$fill])
+        )
+        print(imputados)
+      }
+      sink()
+    }
+    
+    # Crear el funnel plot
+    par(mar = c(5, 4, 4, 2) + 0.1)
+    funnel_res <- funnel(tf_resultado,
+                        xlab = "Effect Size (g)",
+                        ylab = "Standard Error",
+                        main = paste("Funnel Plot -", nombre_grupo),
+                        pch = 19) # Puntos sólidos negros para estudios originales
+    
+    # Agregar los estudios imputados en blanco con borde negro
+    if(sum(tf_resultado$fill) > 0) {
+      points(tf_resultado$yi[tf_resultado$fill], 
+             tf_resultado$vi[tf_resultado$fill]^0.5, 
+             pch = 21,  # Círculo con borde
+             bg = "white",  # Relleno blanco
+             col = "black",  # Borde negro
+             cex = 1.2)  # Ligeramente más grande para mejor visibilidad
+    }
+    
+    # Guardar en PDF si se solicita
+    if(guardar_pdf && !is.null(nombre_archivo)) {
+      pdf(nombre_archivo, width = 8, height = 10)
+      funnel(tf_resultado,
+             xlab = "Effect Size (g)",
+             ylab = "Standard Error",
+             main = paste("Funnel Plot -", nombre_grupo),
+             pch = 19)
+      if(sum(tf_resultado$fill) > 0) {
+        points(tf_resultado$yi[tf_resultado$fill], 
+               tf_resultado$vi[tf_resultado$fill]^0.5, 
+               pch = 21,
+               bg = "white",
+               col = "black",
+               cex = 1.2)
+      }
+      dev.off()
+    }
+    
+    # Devolver los resultados
+    return(list(
+      funnel_plot = funnel_res,
+      trim_fill_results = tf_resultado
+    ))
+    
+  }, error = function(e) {
+    message(paste("Advertencia: No se pudo crear funnel plot para grupo", nombre_grupo))
+    message("Error: ", e$message)
+    return(NULL)
+  })
+}
+
+
+# Función principal para generar todos los gráficos
+generar_graficos_por_grupo <- function(lista_rma, grupos, 
+                                     guardar_pdf = FALSE, 
+                                     titletag = NULL, 
+                                     fechatag = NULL) {
+  
+  # Si se va a guardar, verificar que existan los tags
+  if(guardar_pdf) {
+    if(is.null(titletag) || is.null(fechatag)) {
+      stop("Para guardar PDFs, necesitas proporcionar titletag y fechatag")
+    }
+    base_nombre <- paste0(titletag, "_", fechatag)
+  }
+  
+  for(grupo in grupos) {
+    message("\nProcesando grupo: ", grupo)
+    
+    # Verificar que el objeto rma tenga los studyId como slab
+    if(is.null(lista_rma[[grupo]]$slab)) {
+      stop("El objeto rma debe tener los studyId en el campo slab")
+    }
+    
+    # Extraer datos del objeto rma
+    datos_grupo <- data.frame(
+      yi = lista_rma[[grupo]]$yi,
+      vi = lista_rma[[grupo]]$vi,
+      slab = lista_rma[[grupo]]$slab
+    )
+    
+    # Generar nombres de archivo si se va a guardar
+    if(guardar_pdf) {
+      nombre_forest <- paste0(base_nombre, "_", grupo, "_forest.pdf")
+      nombre_funnel <- paste0(base_nombre, "_", grupo, "_funnel.pdf")
+      nombre_txt <- paste0(base_nombre, "_", grupo, "_trimfill_results.txt")
+    } else {
+      nombre_forest <- NULL
+      nombre_funnel <- NULL
+      nombre_txt <- NULL
+    }
+    
+    # Crear forest plot
+    crear_forest(lista_rma[[grupo]], datos_grupo, grupo, 
+                guardar_pdf = guardar_pdf, 
+                nombre_archivo = nombre_forest)
+    
+    # Crear funnel plot
+    crear_funnel(lista_rma[[grupo]], grupo, 
+                guardar_pdf = guardar_pdf, 
+                nombre_archivo = nombre_funnel,
+                guardar_txt = guardar_pdf,
+                nombre_archivo_txt = nombre_txt)
+  }
+}
+
+# Ejemplos de uso:
+
+# # 1. Solo mostrar en pantalla (sin guardar)
+# generar_graficos_por_grupo(lista_rma, grupos)
+# 
+# 2. Guardar PDFs y txt
+titletag <- "ART-736canetMeta-analisis"
+fechatag <- format(Sys.Date(), "%Y%m%d")
+generar_graficos_por_grupo(
+  lista_rma = lista_rma,
+  grupos = grupos,
+  guardar_pdf = TRUE,
+  titletag = titletag,
+  fechatag = fechatag
+)
+
+
+```
+
+
+# Etapa 4. Codigo a Ejecutar. depurando el codigo que no funciona. Ahora funciona pero no he comprobado que los resultados sean coherentes con los visuales de pantalla (que deben serlo)
+
+Para determinar si los grupos son significativamente diferentes, debes mirar principalmente estos valores:
+
+Q_between (estadístico Q entre grupos): Indica la variabilidad entre los grupos que estás comparando p_between (valor p para Q between): El valor p asociado a la prueba de heterogeneidad entre grupos
+
+Información adicional en la tabla: Q_within: Indica heterogeneidad dentro de cada grupo p_within: Valores p muy pequeños (como 1.04E-201) indican alta heterogeneidad dentro de los grupos Q_total: Heterogeneidad total (suma de between y within) df_between: Siempre es 1 porque comparamos dos grupos df_within: Grados de libertad para la heterogeneidad dentro de los grupos
+
+```{r}
+# Cargar librerías necesarias
+library(readxl)
+library(metafor)
+library(writexl)
+
+# Cargar los datos
+# datosXmeta <- read_excel("DATOS PARA ANALISIS_V5.xlsx")
+datosXmeta <- read_excel("ART-736canetMeta-EScolapsados_20241020_215007ordered_SEGUNDA FASE_V2.xlsx")
+
+# Convertir las columnas a numéricas
+datosXmeta$effectsize_g <- as.numeric(datosXmeta$effectsize_g)
+datosXmeta$variance_g <- as.numeric(datosXmeta$variance_g)
+
+# Definir columnas
+effectSizeXmeta <- "effectsize_g"
+effectSizeVarXmeta <- "variance_g" 
+moderadoraXmeta <- "analysis"
+
+# Definir pares de comparación (puedes usar tus pares completos aquí)
+pares_comparacion <- list(
+  c("360-degree video", "3DCG"),
+  c("360IFPE", "360IW"),
+  c("360IFPE", "ITPE"),
+  c("360IFPE", "ISIC"),
+  c("360IFPE_Attitude", "360IW_Attitude"),
+  c("360IFPE_Attitude", "3DIFPE_Attitude"),
+  c("360IFPE_Empathy", "360IFPE_Attitude"),
+  c("360IFPE_Empathy", "360IW_Empathy"),
+  c("360IFPE_Empathy", "3DIFPE_Attitude"),
+  c("360IFPE_Empathy", "3DIFPE_Behaviour"),
+  c("360IFPE_Empathy", "3DIFPE_Empathy"),
+  c("360IFPE_Empathy", "3DIFPE_Intention"),
+  c("360IFPE_Modality", "360IW_Modality"),
+  c("360IFPE_Modality", "3DIFPE_Modality"),
+  c("360IFPE_Modality", "3DIW_Modality"),
+  c("360IFPE_Modality", "360IFPE"),
+  c("360IW", "ITPE"),
+  c("360IW", "ISIC"),
+  c("360IW_Attitude", "3DIFPE_Attitude"),
+  c("360IW_Attitude", "360IW_Behaviour"),
+  c("360IW_Behaviour", "3DIFPE_Behaviour"),
+  c("360IW_Behaviour", "360IW_Attitude"),
+  c("360IW_Empathy", "360IW_Attitude"),
+  c("360IW_Empathy", "360IW_Behaviour"),
+  c("360IW_Empathy", "360IW_Intention"),
+  c("360IW_Empathy", "3DIFPE_Empathy"),
+  c("360IW_EmpathyEmotional", "360IW_EmpathyCognitive"),
+  c("360IW_EmpathyGeneral", "360IW_EmpathyEmotional"),
+  c("360IW_EmpathyGeneral", "360IW_EmpathyCognitive"),
+  c("360IW_Intention", "3DIFPE_Intention"),
+  c("360IW_Intention", "360IW_Behaviour"),
+  c("360IW_Intention", "360IW_Attitude"),
+  c("360IW_Modality", "3DIFPE_Modality"),
+  c("360IW_Modality", "3DIW_Modality"),
+  c("360IW_Modality", "360IW"),
+  c("360IW_Screen360HMD", "360IW_ScreenHMD"),
+  c("360IW_ScreenHMD", "360IW_Screen360HMD"),
+  c("3DIFPE", "360IFPE"),
+  c("3DIFPE", "360IW"),
+  c("3DIFPE", "ITPE"),
+  c("3DIFPE", "ISIC"),
+  c("3DIFPE_Attitude", "3DIFPE_Behaviour"),
+  c("3DIFPE_Behaviour", "3DIFPE_Empathy"),
+  c("3DIFPE_Behaviour", "3DIFPE_Attitude"),
+  c("3DIFPE_Empathy", "3DIFPE_Behaviour"),
+  c("3DIFPE_Empathy", "3DIFPE_Behaviour"),
+  c("3DIFPE_Empathy", "3DIFPE_Intention"),
+  c("3DIFPE_Empathy", "3DIFPE_Attitude"),
+  c("3DIFPE_EmpathyGeneral", "3DIFPE_EmpathyEmotional"),
+  c("3DIFPE_Intention", "3DIFPE_Behaviour"),
+  c("3DIFPE_Intention", "3DIFPE_Empathy"),
+  c("3DIFPE_Intention", "3DIFPE_Attitude"),
+  c("3DIFPE_Modality", "3DIW_Modality"),
+  c("3DIFPE_Modality", "3DIFPE"),
+  c("Ageism", "Health"),
+  c("Ageism", "Migration_Racism_Refugees"),
+  c("AgeStudents+25", "AgeStudents18-24"),
+  c("AgeStudents18-24", "AgeStudents>25"),
+  c("Atittude_Modality", "Empathy_Modality"),
+  c("Atittude_Modality", "Intention_Modality"),
+  c("Atittude_Modality", "Attitude"),
+  c("Attitude", "Behavior"),
+  c("Attitude", "Intention"),
+  c("Attitude", "IOS"),
+  c("Attitude", "Empathy"),
+  c("Attitude_Modality", "Attitude"),
+  c("Attitude_Modality", "Empathy_Modality"),
+  c("Attitude_Modality", "Intention _Modality"),
+  c("AttitudeExplicit", "AttitudeImplicit_IAT"),
+  c("Behavior", "Intention"),
+  c("Behavior", "IOS"),
+  c("Behavior", "Empathy"),
+  c("Disabilities", "Stigmatized"),
+  c("Disabilities", "Ageism"),
+  c("Disabilities", "Health"),
+  c("Disabilities", "Migration_Racism_Refugees"),
+  c("Empathy_Modality", "Empathy"),
+  c("Empathy_Modality", "Intention_Modality"),
+  c("Empathy_Modality", "Empathy"),
+  c("EmpathyCognitive_Modality", "EmpathyEmotional_Modality"),
+  c("EmpathyCognitive_Modality", "EmpathyGeneral_Modality"),
+  c("EmpathyEmotional", "EmpathyCognitive"),
+  c("EmpathyEmotional_Batson", "EmpathyEmotional_IRI"),
+  c("EmpathyEmotional_Batson", "EmpathyCognitive_IRI"),
+  c("EmpathyEmotional_IRI", "EmpathyCognitive_IRI"),
+  c("EmpathyEmotional_Modality", "EmpathyGeneral_Modality"),
+  c("EmpathyGeneral", "EmpathyEmotional"),
+  c("EmpathyGeneral", "EmpathyCognitive"),
+  c("EmpathyGeneral_Modality", "EmpathyEmotional_Modality"),
+  c("Gender >60%", "Gender 100%"),
+  c("Gender 40%-59% ", "Gender >60%"),
+  c("Gender 40%-59% ", "Gender 100%"),
+  c("Gender 40perc-59perc", "Gender +60perc"),
+  c("Gender 40perc-59perc", "Gender 100perc"),
+  c("Health", "Migration_Racism_Refugees"),
+  c("Intention", "IOS"),
+  c("Intention", "Empathy"),
+  c("Intention _Modality", "Intention"),
+  c("IOS", "Empathy"),
+  c("ITPE", "ISIC"),
+  c("MCIE", "ME"),
+  c("MCLI", "MCPT"),
+  c("MCLI", "MCIE"),
+  c("MCLI", "ME"),
+  c("MCPT", "MCIE"),
+  c("MCPT", "ME"),
+  c("Migration", "RacismBlackPeople"),
+  c("Migration", "Refugees"),
+  c("Overall", "Overall_Update"),
+  c("Overall", "Overall_Modality"),
+  c("RacismBlackPeople", "Refugees"),
+  c("Screen360HMD", "ScreenHMD"),
+  c("Screen360HMD", "TextHMD"),
+  c("Screen360HMD", "TextHMD"),
+  c("ScreenHMD", "TextHMD"),
+  c("ScreenORScreen360Cardboard", "ScreenORScreen360HMD"),
+  c("ScreenORScreen360Cardboard", "Screen360HMD"),
+  c("ScreenORScreen360Cardboard", "ScreenHMD"),
+  c("ScreenORScreen360Cardboard", "TextHMD"),
+  c("Stigmatized", "Ageism"),
+  c("Stigmatized", "Health"),
+  c("Stigmatized", "Migration_Racism_Refugees")
+
+)
+
+# Inicializar una lista para almacenar los resultados
+resultados_lista <- list()
+
+# Para cada par de grupos
+for(par in pares_comparacion) {
+    grupo1 <- par[1]
+    grupo2 <- par[2]
+    
+    cat("\n===== PROCESANDO:", grupo1, "vs", grupo2, "=====\n")
+    
+    # Filtrar datos
+    datos_subset <- datosXmeta[datosXmeta[[moderadoraXmeta]] %in% c(grupo1, grupo2), ]
+    
+    # Verificar si hay datos
+    n_grupo1 <- sum(datos_subset[[moderadoraXmeta]] == grupo1)
+    n_grupo2 <- sum(datos_subset[[moderadoraXmeta]] == grupo2)
+    
+    cat("- Filas en grupo", grupo1, ":", n_grupo1, "\n")
+    cat("- Filas en grupo", grupo2, ":", n_grupo2, "\n")
+    
+    if(n_grupo1 > 0 && n_grupo2 > 0) {
+        # Crear factor
+        datos_subset$factor <- ifelse(datos_subset[[moderadoraXmeta]] == grupo1, 1, 2)
+        
+        # Meta-análisis con tryCatch para capturar cualquier error
+        tryCatch({
+            resultado <- rma(yi = datos_subset[[effectSizeXmeta]],
+                           vi = datos_subset[[effectSizeVarXmeta]],
+                           mods = ~ factor,
+                           data = datos_subset,
+                           method = "REML")
+            
+            # Verificar las piezas de información que necesitamos
+            # Para QE.df, si no existe, podemos usar k-p (total de estudios menos número de parámetros)
+            if (!exists("QE.df", where = resultado)) {
+                # Calcular los grados de libertad para QE
+                # Generalmente es k - p (número de estudios - número de parámetros)
+                df_within <- resultado$k - resultado$p
+                cat("- Calculando QE.df manualmente:", df_within, "\n")
+            } else {
+                df_within <- resultado$QE.df
+            }
+            
+            # Calcular Q total y p total
+            Q_total <- resultado$QM + resultado$QE
+            df_total <- resultado$m + df_within
+            p_total <- pchisq(Q_total, df_total, lower.tail = FALSE)
+            
+            # Crear lista de resultados para esta comparación
+            resultado_comparacion <- list(
+                Grupo1 = grupo1,
+                Grupo2 = grupo2,
+                Q_between = resultado$QM,
+                df_between = resultado$m,
+                p_between = resultado$QMp,
+                Q_within = resultado$QE,
+                df_within = df_within,
+                p_within = resultado$QEp,
+                Q_total = Q_total,
+                df_total = df_total,
+                p_total = p_total
+            )
+            
+            # Agregar a la lista de resultados
+            resultados_lista <- c(resultados_lista, list(resultado_comparacion))
+            cat("- Resultados agregados correctamente a la lista\n")
+            
+        }, error = function(e) {
+            cat("- ERROR en el análisis:", e$message, "\n")
+        })
+    } else {
+        cat("- No hay suficientes datos para la comparación\n")
+    }
+}
+
+# Verificar si tenemos resultados
+if(length(resultados_lista) > 0) {
+    cat("\nCreando data.frame a partir de", length(resultados_lista), "resultados...\n")
+    
+    # Crear data.frame a partir de la lista
+    resultados_df <- do.call(rbind, lapply(resultados_lista, function(x) {
+        data.frame(
+            Grupo1 = x$Grupo1,
+            Grupo2 = x$Grupo2,
+            Q_between = x$Q_between,
+            df_between = x$df_between,
+            p_between = x$p_between,
+            Q_within = x$Q_within,
+            df_within = x$df_within,
+            p_within = x$p_within,
+            Q_total = x$Q_total,
+            df_total = x$df_total,
+            p_total = x$p_total,
+            stringsAsFactors = FALSE
+        )
+    }))
+    
+
+    # Guardar en Excel
+    nombre_archivoxlQ <- paste0("ART-736canetMeta-analisis-grupos-",fechatag, ".xlsx")
+    
+    write_xlsx(resultados_df, nombre_archivoxlQ)
+    cat("Archivo guardado exitosamente con", nrow(resultados_df), "comparaciones\n")
+    
+    # Mostrar primeras filas
+    print(head(resultados_df))
+} else {
+    cat("No se generaron resultados para guardar\n")
+}
+```
+
+# comprobando la diferencia significativa de gs a mano
+
+La prueba de Q_between y la prueba Z manual pueden dar resultados diferentes porque: a) Q_between en metaanálisis considera la heterogeneidad y pondera los estudios según su precisión, mientras que la fórmula Z simple no lo hace. b) Si estás trabajando con un modelo de efectos aleatorios, los cálculos de varianza son diferentes a los de un modelo de efectos fijos. c) La prueba Q tiene menor potencia estadística en algunos escenarios, especialmente cuando hay pocos estudios.
+
+El análisis de Q_between de metafor no se basa únicamente en la diferencia directa de las estimaciones puntuales, sino que considera la variabilidad total, incluyendo la heterogeneidad dentro de cada grupo (Q_within). Por tanto, esta prueba no solo compara las medias, sino también tiene en cuenta la varianza dentro de los grupos y cuánta heterogeneidad existe en cada uno. Q_between evalúa si los tamaños del efecto medios en los subgrupos difieren significativamente teniendo en cuenta la heterogeneidad dentro de cada grupo.
+
+Una gran heterogeneidad dentro de cada grupo (como es tu caso: I² = \~96-98%) hace más difícil detectar diferencias entre grupos, porque parte de la diferencia observada puede atribuirse simplemente al ruido o a variaciones internas muy grandes.
+
+¿Por qué el solapamiento de intervalos de confianza puede ser engañoso? El solapamiento de intervalos de confianza no siempre implica ausencia absoluta de diferencia significativa, especialmente si las varianzas son altas. Sin embargo, es un indicador aproximado de que es poco probable encontrar diferencias significativas con métodos más robustos (como el Q_between) que consideran la heterogeneidad.
+
+```{r}
+
+# Calcular Z
+g1 = 0.532912601
+g2 = 0.089220395
+se1 = 0.096767941
+se2 = 0.054995525
+
+z = (g1 - g2) / sqrt(se1^2 + se2^2)
+p_value = 2 * (1 - pnorm(abs(z)))  # multiplicamos por 2 para test bilateral
+
+print(paste("Z =", z))
+print(paste("p-value =", p_value))
+```
+
+```{r}
+
+# Calcular Z
+g1 = 0.0400803
+g2 = 0.997597337
+se1 = 0.299722827
+se2 = 0.374435123
+
+z = (g1 - g2) / sqrt(se1^2 + se2^2)
+p_value = 2 * (1 - pnorm(abs(z)))  # multiplicamos por 2 para test bilateral
+
+print(paste("Z =", z))
+print(paste("p-value =", p_value))
+```
